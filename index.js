@@ -27,7 +27,7 @@ const client = new MongoClient(process.env.MONGO_DB, {
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
 
     const db = client.db("staysphere");
 
@@ -48,30 +48,21 @@ async function run() {
 
     // ====================== MIDDLEWARES ======================
     const verifyToken = (req, res, next) => {
-      console.log("COOKIES =", req.cookies);
-
       const token = req.cookies?.token;
 
       if (!token) {
-        return res.status(401).send({
-          message: "Unauthorized",
-        });
+        return res.status(401).send({ message: "Unauthorized - No token" });
       }
 
       jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
         if (err) {
-          return res.status(403).send({
-            message: "Forbidden",
-          });
+          return res.status(403).send({ message: "Invalid Token" });
         }
-
-        console.log("DECODED =", decoded);
 
         req.user = decoded;
         next();
       });
     };
-
     const getUserRole = async (email) => {
       const user = await userCollection.findOne({ email });
       return user?.role || "tenant";
@@ -106,68 +97,86 @@ async function run() {
 
     app.post("/properties", verifyToken, verifyOwner, async (req, res) => {
       const property = req.body;
-      const propertyWithOwner = { ...property, ownerEmail: req.user.email, status: "pending" };
+      const propertyWithOwner = {
+        ...property,
+        ownerEmail: req.user.email,
+        status: "pending",
+      };
 
       const result = await propertyCollection.insertOne(propertyWithOwner);
       res.send(result);
     });
 
-    app.delete("/properties/:id", verifyToken, verifyOwner, async (req, res) => {
-      const id = req.params.id;
-      const result = await propertyCollection.deleteOne({
-        _id: new ObjectId(id),
-        ownerEmail: req.user.email,
-      });
-      res.send(result);
+    app.delete(
+      "/properties/:id",
+      verifyToken,
+      verifyOwner,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await propertyCollection.deleteOne({
+          _id: new ObjectId(id),
+          ownerEmail: req.user.email,
+        });
+        res.send(result);
+      },
+    );
+
+    app.get("/property/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        // ✅ Fixed: Check if valid ObjectId
+        let query;
+        if (ObjectId.isValid(id)) {
+          query = { _id: new ObjectId(id) };
+        } else {
+          query = { _id: id }; // fallback
+        }
+
+        const result = await propertyCollection.findOne(query);
+
+        if (!result) {
+          return res.status(404).send({ message: "Property not found" });
+        }
+
+        res.send(result);
+      } catch (error) {
+        console.error("Property fetch error:", error);
+        res.status(500).send({ message: "Server error" });
+      }
     });
-
- app.get("/property/:id", async (req, res) => {
-  try {
-    const id = req.params.id;
-    
-    // ✅ Fixed: Check if valid ObjectId
-    let query;
-    if (ObjectId.isValid(id)) {
-      query = { _id: new ObjectId(id) };
-    } else {
-      query = { _id: id }; // fallback
-    }
-
-    const result = await propertyCollection.findOne(query);
-    
-    if (!result) {
-      return res.status(404).send({ message: "Property not found" });
-    }
-    
-    res.send(result);
-  } catch (error) {
-    console.error("Property fetch error:", error);
-    res.status(500).send({ message: "Server error" });
-  }
-});
 
     app.patch("/property/:id", verifyToken, verifyOwner, async (req, res) => {
       const id = req.params.id;
       const updatedData = req.body;
-      const property = await propertyCollection.findOne({ _id: new ObjectId(id) });
+      const property = await propertyCollection.findOne({
+        _id: new ObjectId(id),
+      });
       if (!property || property.ownerEmail !== req.user.email) {
         return res.status(403).send({ message: "Forbidden" });
       }
       const result = await propertyCollection.updateOne(
         { _id: new ObjectId(id) },
-        { $set: updatedData }
+        { $set: updatedData },
       );
       res.send(result);
     });
 
-    app.get("/my-properties/:email", verifyToken, verifyOwner, async (req, res) => {
-      const email = req.params.email;
-      if (req.user.email !== email) {
-        return res.status(403).send({ message: "Forbidden Access" });
-      }
-      const result = await propertyCollection.find({ ownerEmail: email }).toArray();
-      res.send(result);
-    });
+    app.get(
+      "/my-properties/:email",
+      verifyToken,
+      verifyOwner,
+      async (req, res) => {
+        const email = req.params.email;
+        if (req.user.email !== email) {
+          return res.status(403).send({ message: "Forbidden Access" });
+        }
+        const result = await propertyCollection
+          .find({ ownerEmail: email })
+          .toArray();
+        res.send(result);
+      },
+    );
 
     app.get("/user/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
@@ -189,25 +198,32 @@ async function run() {
       }
       const result = await userCollection.updateOne(
         { _id: new ObjectId(id) },
-        { $set: { role } }
+        { $set: { role } },
       );
       res.send(result);
     });
 
     app.get("/my-bookings", verifyToken, async (req, res) => {
       const email = req.user.email;
-      const result = await bookingCollection.find({ tenantEmail: email }).toArray();
+      const result = await bookingCollection
+        .find({ tenantEmail: email })
+        .toArray();
       res.send(result);
     });
 
-    app.get("/booking-requests/:ownerEmail", verifyToken, verifyOwner, async (req, res) => {
-      const ownerEmail = req.params.ownerEmail;
-      if (req.user.email !== ownerEmail) {
-        return res.status(403).send({ message: "Forbidden Access" });
-      }
-      const result = await bookingCollection.find({ ownerEmail }).toArray();
-      res.send(result);
-    });
+    app.get(
+      "/booking-requests/:ownerEmail",
+      verifyToken,
+      verifyOwner,
+      async (req, res) => {
+        const ownerEmail = req.params.ownerEmail;
+        if (req.user.email !== ownerEmail) {
+          return res.status(403).send({ message: "Forbidden Access" });
+        }
+        const result = await bookingCollection.find({ ownerEmail }).toArray();
+        res.send(result);
+      },
+    );
 
     app.post("/bookings", verifyToken, async (req, res) => {
       try {
@@ -216,17 +232,24 @@ async function run() {
           return res.status(403).send({ message: "Forbidden Access" });
         }
         if (booking.ownerEmail === req.user.email) {
-          return res.status(403).send({ message: "Cannot book your own property" });
+          return res
+            .status(403)
+            .send({ message: "Cannot book your own property" });
         }
         const existing = await bookingCollection.findOne({
           propertyId: booking.propertyId,
           tenantEmail: req.user.email,
-          status: { $in: ["pending", "approved"] }
+          status: { $in: ["pending", "approved"] },
         });
         if (existing) {
-          return res.status(400).send({ message: "Booking already exists for this property" });
+          return res
+            .status(400)
+            .send({ message: "Booking already exists for this property" });
         }
-        const result = await bookingCollection.insertOne({ ...booking, status: "pending" });
+        const result = await bookingCollection.insertOne({
+          ...booking,
+          status: "pending",
+        });
         res.send(result);
       } catch (error) {
         console.log(error);
@@ -234,176 +257,235 @@ async function run() {
       }
     });
 
-app.get("/properties", async (req, res) => {
-  try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 6;
-    const skip = (page - 1) * limit;
-
-    const search = req.query.search || "";
-    const propertyType = req.query.propertyType || "all";
-    const minPrice = parseInt(req.query.minPrice) || 0;
-    const maxPrice = parseInt(req.query.maxPrice) || 999999;
-
-    let query = { status: "approved" }; // Only approved properties for public
-
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { location: { $regex: search, $options: "i" } }
-      ];
-    }
-
-    if (propertyType !== "all") {
-      query.propertyType = propertyType;
-    }
-
-    query.rent = { $gte: minPrice, $lte: maxPrice };
-
-    const total = await propertyCollection.countDocuments(query);
-    const properties = await propertyCollection
-      .find(query)
-      .skip(skip)
-      .limit(limit)
-      .toArray();
-
-    res.send({
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-      properties,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).send({ message: "Failed to load properties" });
-  }
-});
-
-    app.patch("/booking-status/:id", verifyToken, verifyOwner, async (req, res) => {
+    app.get("/properties", async (req, res) => {
       try {
-        const id = req.params.id;
-        const { status } = req.body;
-        const booking = await bookingCollection.findOne({ _id: new ObjectId(id) });
-        if (!booking) return res.status(404).send({ message: "Booking not found" });
-        if (booking.ownerEmail !== req.user.email) {
-          return res.status(403).send({ message: "Forbidden" });
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 6;
+        const skip = (page - 1) * limit;
+
+        const search = req.query.search || "";
+        const propertyType = req.query.propertyType || "all";
+        const minPrice = parseInt(req.query.minPrice) || 0;
+        const maxPrice = parseInt(req.query.maxPrice) || 999999;
+
+        let query = { status: "approved" }; // Only approved properties for public
+
+        if (search) {
+          query.$or = [
+            { title: { $regex: search, $options: "i" } },
+            { location: { $regex: search, $options: "i" } },
+          ];
         }
-        const result = await bookingCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } }
-        );
-        res.send(result);
+
+        if (propertyType !== "all") {
+          query.propertyType = propertyType;
+        }
+
+        query.rent = { $gte: minPrice, $lte: maxPrice };
+
+        const total = await propertyCollection.countDocuments(query);
+        const properties = await propertyCollection
+          .find(query)
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        res.send({
+          total,
+          page,
+          totalPages: Math.ceil(total / limit),
+          properties,
+        });
       } catch (error) {
-        res.status(500).send({ message: "Status update failed" });
+        console.error(error);
+        res.status(500).send({ message: "Failed to load properties" });
       }
     });
 
+    app.patch(
+      "/booking-status/:id",
+      verifyToken,
+      verifyOwner,
+      async (req, res) => {
+        try {
+          const id = req.params.id;
+          const { status } = req.body;
+          const booking = await bookingCollection.findOne({
+            _id: new ObjectId(id),
+          });
+          if (!booking)
+            return res.status(404).send({ message: "Booking not found" });
+          if (booking.ownerEmail !== req.user.email) {
+            return res.status(403).send({ message: "Forbidden" });
+          }
+          const result = await bookingCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: { status } },
+          );
+          res.send(result);
+        } catch (error) {
+          res.status(500).send({ message: "Status update failed" });
+        }
+      },
+    );
 
-// ====================== DASHBOARD STATS ======================
-// ====================== DASHBOARD STATS ======================
-app.get("/dashboard-stats", verifyToken, async (req, res) => {
-  try {
-    const email = req.user?.email;
-    if (!email) return res.status(401).send({ message: "Unauthorized" });
+    // ====================== DASHBOARD STATS ======================
+    // ====================== DASHBOARD STATS ======================
+    app.get("/dashboard-stats", verifyToken, async (req, res) => {
+      try {
+        const email = req.user?.email;
+        if (!email) return res.status(401).send({ message: "Unauthorized" });
 
-    const user = await userCollection.findOne({ email });
-    if (!user) return res.status(404).send({ message: "User not found" });
+        const user = await userCollection.findOne({ email });
+        if (!user) return res.status(404).send({ message: "User not found" });
 
-    const role = user.role || "tenant";
+        const role = user.role || "tenant";
 
-    console.log(`📊 Dashboard request from ${email} (${role})`);
+        console.log(`📊 Dashboard request from ${email} (${role})`);
 
-    // ==================== ADMIN ====================
-    if (role === "admin") {
-      const totalUsers = await userCollection.countDocuments();
-      const totalProperties = await propertyCollection.countDocuments();
-      const totalBookings = await bookingCollection.countDocuments();
+        // ==================== ADMIN ====================
+        if (role === "admin") {
+          const totalUsers = await userCollection.countDocuments();
+          const totalProperties = await propertyCollection.countDocuments();
+          const totalBookings = await bookingCollection.countDocuments();
 
-      // ✅ Fixed Revenue Calculation
-      const totalRevenueResult = await transactionCollection.aggregate([
-        { $group: { _id: null, total: { $sum: { $toDouble: "$amount" } } } }
-      ]).toArray();
+          // ✅ Fixed Revenue Calculation
+          const totalRevenueResult = await transactionCollection
+            .aggregate([
+              {
+                $group: {
+                  _id: null,
+                  total: { $sum: { $toDouble: "$amount" } },
+                },
+              },
+            ])
+            .toArray();
 
-      const totalRevenue = totalRevenueResult[0]?.total || 0;
+          const totalRevenue = totalRevenueResult[0]?.total || 0;
 
-      console.log(`✅ Admin Revenue: ৳${totalRevenue}`);
+          console.log(`✅ Admin Revenue: ৳${totalRevenue}`);
 
-      return res.send({
-        role: "admin",
-        totalUsers,
-        totalProperties,
-        totalBookings,
-        totalRevenue,
-      });
-    }
+          return res.send({
+            role: "admin",
+            totalUsers,
+            totalProperties,
+            totalBookings,
+            totalRevenue,
+          });
+        }
 
-    // ==================== OWNER ====================
-    if (role === "owner") {
-      const totalProperties = await propertyCollection.countDocuments({ ownerEmail: email });
-      const approvedProperties = await propertyCollection.countDocuments({ ownerEmail: email, status: "approved" });
-      const pendingProperties = await propertyCollection.countDocuments({ ownerEmail: email, status: "pending" });
-      const rejectedProperties = await propertyCollection.countDocuments({ ownerEmail: email, status: "rejected" });
+        // ==================== OWNER ====================
+        if (role === "owner") {
+          const totalProperties = await propertyCollection.countDocuments({
+            ownerEmail: email,
+          });
+          const approvedProperties = await propertyCollection.countDocuments({
+            ownerEmail: email,
+            status: "approved",
+          });
+          const pendingProperties = await propertyCollection.countDocuments({
+            ownerEmail: email,
+            status: "pending",
+          });
+          const rejectedProperties = await propertyCollection.countDocuments({
+            ownerEmail: email,
+            status: "rejected",
+          });
 
-      const totalBookings = await bookingCollection.countDocuments({ ownerEmail: email });
-      const approvedBookings = await bookingCollection.countDocuments({ ownerEmail: email, status: "approved" });
-      const pendingBookings = await bookingCollection.countDocuments({ ownerEmail: email, status: "pending" });
+          const totalBookings = await bookingCollection.countDocuments({
+            ownerEmail: email,
+          });
+          const approvedBookings = await bookingCollection.countDocuments({
+            ownerEmail: email,
+            status: "approved",
+          });
+          const pendingBookings = await bookingCollection.countDocuments({
+            ownerEmail: email,
+            status: "pending",
+          });
 
-      // ✅ Fixed Owner Earnings
-      const earningsResult = await transactionCollection.aggregate([
-        { $match: { ownerEmail: email } },
-        { $group: { _id: null, totalEarnings: { $sum: { $toDouble: "$amount" } } } }
-      ]).toArray();
+          // ✅ Fixed Owner Earnings
+          const earningsResult = await transactionCollection
+            .aggregate([
+              { $match: { ownerEmail: email } },
+              {
+                $group: {
+                  _id: null,
+                  totalEarnings: { $sum: { $toDouble: "$amount" } },
+                },
+              },
+            ])
+            .toArray();
 
-      const totalEarnings = earningsResult[0]?.totalEarnings || 0;
+          const totalEarnings = earningsResult[0]?.totalEarnings || 0;
 
-      console.log(`✅ Owner Earnings for ${email}: ৳${totalEarnings}`);
+          console.log(`✅ Owner Earnings for ${email}: ৳${totalEarnings}`);
 
-      return res.send({
-        role: "owner",
-        totalProperties,
-        approvedProperties,
-        pendingProperties,
-        rejectedProperties,
-        totalBookings,
-        approvedBookings,
-        pendingBookings,
-        totalEarnings,
-        occupancyRate: totalProperties > 0 ? Math.round((approvedBookings / totalProperties) * 100) : 0,
-      });
-    }
+          return res.send({
+            role: "owner",
+            totalProperties,
+            approvedProperties,
+            pendingProperties,
+            rejectedProperties,
+            totalBookings,
+            approvedBookings,
+            pendingBookings,
+            totalEarnings,
+            occupancyRate:
+              totalProperties > 0
+                ? Math.round((approvedBookings / totalProperties) * 100)
+                : 0,
+          });
+        }
 
-    // ==================== TENANT ====================
-    if (role === "tenant") {
-      const totalBookings = await bookingCollection.countDocuments({ tenantEmail: email });
-      const approvedBookings = await bookingCollection.countDocuments({ tenantEmail: email, status: "approved" });
-      const pendingBookings = await bookingCollection.countDocuments({ tenantEmail: email, status: "pending" });
+        // ==================== TENANT ====================
+        if (role === "tenant") {
+          const totalBookings = await bookingCollection.countDocuments({
+            tenantEmail: email,
+          });
+          const approvedBookings = await bookingCollection.countDocuments({
+            tenantEmail: email,
+            status: "approved",
+          });
+          const pendingBookings = await bookingCollection.countDocuments({
+            tenantEmail: email,
+            status: "pending",
+          });
 
-      const totalFavorites = await favoriteCollection.countDocuments({ userEmail: email });
+          const totalFavorites = await favoriteCollection.countDocuments({
+            userEmail: email,
+          });
 
-      const transactions = await transactionCollection.find({ tenantEmail: email }).toArray();
-      const totalPaid = transactions.reduce((sum, t) => sum + Number(t.amount || 0), 0);
+          const transactions = await transactionCollection
+            .find({ tenantEmail: email })
+            .toArray();
+          const totalPaid = transactions.reduce(
+            (sum, t) => sum + Number(t.amount || 0),
+            0,
+          );
 
-      return res.send({
-        role: "tenant",
-        totalBookings,
-        approvedBookings,
-        pendingBookings,
-        totalFavorites,
-        totalPaid,
-      });
-    }
+          return res.send({
+            role: "tenant",
+            totalBookings,
+            approvedBookings,
+            pendingBookings,
+            totalFavorites,
+            totalPaid,
+          });
+        }
 
-    return res.status(400).send({ message: "Invalid Role" });
-
-  } catch (error) {
-    console.error("❌ Dashboard Stats Error:", error);
-    res.status(500).send({ message: "Server Error" });
-  }
-});
+        return res.status(400).send({ message: "Invalid Role" });
+      } catch (error) {
+        console.error("❌ Dashboard Stats Error:", error);
+        res.status(500).send({ message: "Server Error" });
+      }
+    });
 
     app.get("/favorites", verifyToken, async (req, res) => {
       const email = req.user.email;
-      const result = await favoriteCollection.find({ userEmail: email }).toArray();
+      const result = await favoriteCollection
+        .find({ userEmail: email })
+        .toArray();
       res.send(result);
     });
 
@@ -428,7 +510,6 @@ app.get("/dashboard-stats", verifyToken, async (req, res) => {
       });
       res.send(result);
     });
-    
 
     app.post("/reviews", verifyToken, async (req, res) => {
       const review = { ...req.body, reviewerEmail: req.user.email };
@@ -437,7 +518,9 @@ app.get("/dashboard-stats", verifyToken, async (req, res) => {
         reviewerEmail: req.user.email,
       });
       if (existing) {
-        return res.status(400).send({ message: "Already reviewed this property" });
+        return res
+          .status(400)
+          .send({ message: "Already reviewed this property" });
       }
       const result = await reviewCollection.insertOne(review);
       res.send(result);
@@ -449,15 +532,20 @@ app.get("/dashboard-stats", verifyToken, async (req, res) => {
       res.send(result);
     });
 
-    app.patch("/property-status/:id", verifyToken, verifyAdmin, async (req, res) => {
-      const id = req.params.id;
-      const { status, feedback } = req.body;
-      const result = await propertyCollection.updateOne(
-        { _id: new ObjectId(id) },
-        { $set: { status, feedback } }
-      );
-      res.send(result);
-    });
+    app.patch(
+      "/property-status/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const { status, feedback } = req.body;
+        const result = await propertyCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status, feedback } },
+        );
+        res.send(result);
+      },
+    );
 
     app.get("/all-properties", verifyToken, verifyAdmin, async (req, res) => {
       const result = await propertyCollection.find().toArray();
@@ -484,24 +572,21 @@ app.get("/dashboard-stats", verifyToken, async (req, res) => {
       }
     });
 
-app.post("/transactions", verifyToken, async (req, res) => {
-  try {
-    const transaction = {
-      ...req.body,
-      createdAt: new Date(),
-    };
+    app.post("/transactions", verifyToken, async (req, res) => {
+      try {
+        const transaction = {
+          ...req.body,
+          createdAt: new Date(),
+        };
 
-  
-    const result = await transactionCollection.insertOne(transaction);
+        const result = await transactionCollection.insertOne(transaction);
 
-  
-
-    res.send({ success: true, insertedId: result.insertedId });
-  } catch (error) {
-    console.error("Transaction Save Error:", error);
-    res.status(500).send({ message: "Transaction save failed" });
-  }
-});
+        res.send({ success: true, insertedId: result.insertedId });
+      } catch (error) {
+        console.error("Transaction Save Error:", error);
+        res.status(500).send({ message: "Transaction save failed" });
+      }
+    });
 
     app.get("/transactions", verifyToken, async (req, res) => {
       const role = await getUserRole(req.user.email);
@@ -543,7 +628,10 @@ app.post("/transactions", verifyToken, async (req, res) => {
       const existingUser = await userCollection.findOne({ email: user.email });
       if (existingUser) {
         if (!existingUser.role) {
-          await userCollection.updateOne({ email: user.email }, { $set: { role: "tenant" } });
+          await userCollection.updateOne(
+            { email: user.email },
+            { $set: { role: "tenant" } },
+          );
         }
         return res.send({ success: true });
       }
