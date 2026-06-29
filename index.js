@@ -108,3 +108,45 @@ const verifyOwner = (req, res, next) => {
   }
   next();
 };
+
+app.post("/save-user", async (req, res) => {
+  try {
+    const user = req.body;
+    const existingUser = await userCollection.findOne({ email: user.email });
+
+    if (existingUser) {
+      if (!existingUser.role) {
+        await userCollection.updateOne(
+          { email: user.email },
+          { $set: { role: "tenant" } }
+        );
+      }
+      return res.send({ success: true });
+    }
+
+    await userCollection.insertOne({
+      ...user,
+      role: user.role || "tenant",
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    res.send({ success: true });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to save user" });
+  }
+});
+
+app.get("/user-role/:email", async (req, res) => {
+  try {
+    const email = req.params.email;
+    const user = await userCollection.findOne({ email });
+    
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+    
+    res.send({ role: user.role || "tenant" });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch role" });
+  }
+});
