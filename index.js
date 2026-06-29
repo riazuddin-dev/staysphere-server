@@ -221,3 +221,78 @@ app.get("/properties", async (req, res) => {
     res.status(500).send({ message: "Failed to load properties" });
   }
 });
+
+app.get("/dashboard-stats", verifyToken, async (req, res) => {
+  try {
+    const email = req.user.email;
+    const role = req.user.role;
+
+    if (role === "admin") {
+      const totalUsers = await userCollection.countDocuments();
+      const totalProperties = await propertyCollection.countDocuments();
+      const totalBookings = await bookingCollection.countDocuments();
+      
+      const totalRevenueResult = await transactionCollection
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              total: { $sum: { $toDouble: "$amount" } }
+            }
+          }
+        ])
+        .toArray();
+      
+      const totalRevenue = totalRevenueResult[0]?.total || 0;
+
+      return res.send({
+        role: "admin",
+        totalUsers,
+        totalProperties,
+        totalBookings,
+        totalRevenue,
+      });
+    }
+
+    if (role === "owner") {
+      const totalProperties = await propertyCollection.countDocuments({ ownerEmail: email });
+      const totalBookings = await bookingCollection.countDocuments({ ownerEmail: email });
+      
+      const earningsResult = await transactionCollection
+        .aggregate([
+          { $match: { ownerEmail: email } },
+          {
+            $group: {
+              _id: null,
+              totalEarnings: { $sum: { $toDouble: "$amount" } }
+            }
+          }
+        ])
+        .toArray();
+
+      const totalEarnings = earningsResult[0]?.totalEarnings || 0;
+
+      return res.send({
+        role: "owner",
+        totalProperties,
+        totalBookings,
+        totalEarnings,
+      });
+    }
+
+    if (role === "tenant") {
+      const totalBookings = await bookingCollection.countDocuments({ tenantEmail: email });
+      const totalFavorites = await favoriteCollection.countDocuments({ userEmail: email });
+
+      return res.send({
+        role: "tenant",
+        totalBookings,
+        totalFavorites,
+      });
+    }
+
+    return res.status(400).send({ message: "Invalid Role" });
+  } catch (error) {
+    res.status(500).send({ message: "Server Error" });
+  }
+});
