@@ -296,3 +296,32 @@ app.get("/dashboard-stats", verifyToken, async (req, res) => {
     res.status(500).send({ message: "Server Error" });
   }
 });
+
+
+app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const result = await userCollection.find().toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch users" });
+  }
+});
+
+app.patch("/users/role/:id", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { role } = req.body;
+
+    if (role === "admin") {
+      return res.status(403).send({ message: "Cannot assign admin role" });
+    }
+
+    const result = await userCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { role } }
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to update role" });
+  }
+});
