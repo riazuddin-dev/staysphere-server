@@ -325,3 +325,72 @@ app.patch("/users/role/:id", verifyToken, verifyAdmin, async (req, res) => {
     res.status(500).send({ message: "Failed to update role" });
   }
 });
+
+app.post("/properties", verifyToken, verifyOwner, async (req, res) => {
+  try {
+    const property = {
+      ...req.body,
+      ownerEmail: req.user.email,
+      ownerName: req.user.name,
+      status: "pending",
+      createdAt: new Date(),
+    };
+
+    const result = await propertyCollection.insertOne(property);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to add property" });
+  }
+});
+
+app.patch("/property/:id", verifyToken, verifyOwner, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updatedData = req.body;
+
+    const property = await propertyCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!property || property.ownerEmail !== req.user.email) {
+      return res.status(403).send({ message: "Forbidden" });
+    }
+
+    const result = await propertyCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { ...updatedData, updatedAt: new Date() } }
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to update property" });
+  }
+});
+
+app.delete("/properties/:id", verifyToken, verifyOwner, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const property = await propertyCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!property || property.ownerEmail !== req.user.email) {
+      return res.status(403).send({ message: "Forbidden" });
+    }
+
+    const result = await propertyCollection.deleteOne({ _id: new ObjectId(id) });
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to delete property" });
+  }
+});
+
+app.get("/my-properties/:email", verifyToken, async (req, res) => {
+  try {
+    const email = req.params.email;
+
+    if (req.user.email !== email && req.user.role !== "admin") {
+      return res.status(403).send({ message: "Forbidden Access" });
+    }
+
+    const result = await propertyCollection.find({ ownerEmail: email }).toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch properties" });
+  }
+});
