@@ -575,3 +575,53 @@ app.get("/reviews/:propertyId", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch reviews" });
   }
 });
+
+app.post("/create-payment-intent", verifyToken, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: parseInt(amount * 100),
+      currency: "usd",
+      payment_method_types: ["card"],
+    });
+    res.send({ clientSecret: paymentIntent.client_secret });
+  } catch (error) {
+    res.status(500).send({ message: "Payment Intent Failed" });
+  }
+});
+
+app.post("/transactions", verifyToken, async (req, res) => {
+  try {
+    const transaction = {
+      ...req.body,
+      createdAt: new Date(),
+    };
+
+    const result = await transactionCollection.insertOne(transaction);
+    res.send({ success: true, insertedId: result.insertedId });
+  } catch (error) {
+    res.status(500).send({ message: "Transaction save failed" });
+  }
+});
+
+app.get("/transactions", verifyToken, async (req, res) => {
+  try {
+    const role = req.user.role;
+    const email = req.user.email;
+
+    let query = {};
+    if (role === "owner") {
+      query = { ownerEmail: email };
+    } else if (role === "tenant") {
+      query = { tenantEmail: email };
+    }
+
+    const result = await transactionCollection
+      .find(query)
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch transactions" });
+  }
+});
