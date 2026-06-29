@@ -394,3 +394,100 @@ app.get("/my-properties/:email", verifyToken, async (req, res) => {
     res.status(500).send({ message: "Failed to fetch properties" });
   }
 });
+
+app.post("/bookings", verifyToken, async (req, res) => {
+  try {
+    const booking = req.body;
+
+    if (booking.tenantEmail !== req.user.email) {
+      return res.status(403).send({ message: "Forbidden Access" });
+    }
+
+    if (booking.ownerEmail === req.user.email) {
+      return res.status(403).send({ message: "Cannot book your own property" });
+    }
+
+    const existing = await bookingCollection.findOne({
+      propertyId: booking.propertyId,
+      tenantEmail: req.user.email,
+      status: { $in: ["pending", "approved"] },
+    });
+
+    if (existing) {
+      return res.status(400).send({ message: "Booking already exists" });
+    }
+
+    const result = await bookingCollection.insertOne({
+      ...booking,
+      status: "pending",
+      createdAt: new Date(),
+    });
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Booking Failed" });
+  }
+});
+
+app.get("/my-bookings", verifyToken, async (req, res) => {
+  try {
+    const bookings = await bookingCollection
+      .find({ tenantEmail: req.user.email })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.send(bookings);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch bookings" });
+  }
+});
+
+app.get("/booking-requests/:ownerEmail", verifyToken, async (req, res) => {
+  try {
+    const ownerEmail = req.params.ownerEmail;
+
+    if (req.user.email !== ownerEmail && req.user.role !== "admin") {
+      return res.status(403).send({ message: "Forbidden Access" });
+    }
+
+    const result = await bookingCollection
+      .find({ ownerEmail })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch bookings" });
+  }
+});
+
+app.patch("/booking-status/:id", verifyToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status } = req.body;
+
+    const booking = await bookingCollection.findOne({ _id: new ObjectId(id) });
+
+    if (!booking) {
+      return res.status(404).send({ message: "Booking not found" });
+    }
+
+    if (booking.ownerEmail !== req.user.email && req.user.role !== "admin") {
+      return res.status(403).send({ message: "Forbidden" });
+    }
+
+    const result = await bookingCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, updatedAt: new Date() } }
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Status update failed" });
+  }
+});
+
+app.get("/all-bookings", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const result = await bookingCollection.find().toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch bookings" });
+  }
+});
