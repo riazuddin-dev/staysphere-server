@@ -491,3 +491,87 @@ app.get("/all-bookings", verifyToken, verifyAdmin, async (req, res) => {
     res.status(500).send({ message: "Failed to fetch bookings" });
   }
 });
+
+app.get("/favorites", verifyToken, async (req, res) => {
+  try {
+    const result = await favoriteCollection.find({ userEmail: req.user.email }).toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch favorites" });
+  }
+});
+
+app.post("/favorites", verifyToken, async (req, res) => {
+  try {
+    const favoriteData = {
+      ...req.body,
+      userEmail: req.user.email,
+      createdAt: new Date(),
+    };
+
+    const existing = await favoriteCollection.findOne({
+      propertyId: favoriteData.propertyId,
+      userEmail: favoriteData.userEmail,
+    });
+
+    if (existing) {
+      return res.send({ message: "Already Added" });
+    }
+
+    const result = await favoriteCollection.insertOne(favoriteData);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to add favorite" });
+  }
+});
+
+app.delete("/favorites/:id", verifyToken, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await favoriteCollection.deleteOne({
+      _id: new ObjectId(id),
+      userEmail: req.user.email,
+    });
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to remove favorite" });
+  }
+});
+
+app.post("/reviews", verifyToken, async (req, res) => {
+  try {
+    const review = {
+      ...req.body,
+      reviewerEmail: req.user.email,
+      reviewerName: req.user.name,
+      createdAt: new Date(),
+    };
+
+    const existing = await reviewCollection.findOne({
+      propertyId: review.propertyId,
+      reviewerEmail: req.user.email,
+    });
+
+    if (existing) {
+      return res.status(400).send({ message: "Already reviewed" });
+    }
+
+    const result = await reviewCollection.insertOne(review);
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to add review" });
+  }
+});
+
+app.get("/reviews/:propertyId", async (req, res) => {
+  try {
+    const propertyId = req.params.propertyId;
+    const result = await reviewCollection
+      .find({ propertyId })
+      .sort({ createdAt: -1 })
+      .toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch reviews" });
+  }
+});
