@@ -56,3 +56,55 @@ const port = process.env.PORT || 5000;
 app.listen(port, () => {
   console.log(`🚀 Server running on port ${port}`);
 });
+
+const verifyToken = async (req, res, next) => {
+  try {
+    const sessionToken = req.cookies?.["better-auth.session_token"];
+    
+    if (!sessionToken) {
+      return res.status(401).json({ message: "No session token" });
+    }
+
+    const actualToken = sessionToken.split('.')[0].substring(0, 32);
+    const session = await sessionCollection.findOne({ token: actualToken });
+    
+    if (!session) {
+      return res.status(403).json({ message: "Session not found" });
+    }
+
+    const user = await userCollection.findOne({ 
+      _id: typeof session.userId === 'string' 
+        ? new ObjectId(session.userId)
+        : session.userId 
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    req.user = {
+      email: user.email,
+      name: user.name,
+      role: user.role || "tenant",
+      image: user.image,
+    };
+
+    next();
+  } catch (error) {
+    return res.status(500).json({ message: "Authentication failed" });
+  }
+};
+
+const verifyAdmin = (req, res, next) => {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ message: "Admin Access Only" });
+  }
+  next();
+};
+
+const verifyOwner = (req, res, next) => {
+  if (req.user?.role !== "owner") {
+    return res.status(403).json({ message: "Owner Access Only" });
+  }
+  next();
+};
