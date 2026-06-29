@@ -150,3 +150,74 @@ app.get("/user-role/:email", async (req, res) => {
     res.status(500).send({ message: "Failed to fetch role" });
   }
 });
+
+
+app.get("/property/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    let query = ObjectId.isValid(id) 
+      ? { _id: new ObjectId(id) } 
+      : { _id: id };
+
+    const result = await propertyCollection.findOne(query);
+
+    if (!result) {
+      return res.status(404).send({ message: "Property not found" });
+    }
+
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Server error" });
+  }
+});
+
+app.get("/properties", async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 6;
+    const skip = (page - 1) * limit;
+
+    const search = req.query.search || "";
+    const propertyType = req.query.propertyType || "all";
+    const minPrice = parseInt(req.query.minPrice) || 0;
+    const maxPrice = parseInt(req.query.maxPrice) || 999999;
+    const sort = req.query.sort || "default";
+
+    let query = { status: "approved" };
+
+    if (search) {
+      query.$or = [
+        { title: { $regex: search, $options: "i" } },
+        { location: { $regex: search, $options: "i" } },
+      ];
+    }
+
+    if (propertyType !== "all") {
+      query.propertyType = propertyType;
+    }
+
+    query.rent = { $gte: minPrice, $lte: maxPrice };
+
+    let sortOption = {};
+    if (sort === "low-high") sortOption = { rent: 1 };
+    else if (sort === "high-low") sortOption = { rent: -1 };
+    else sortOption = { createdAt: -1 };
+
+    const total = await propertyCollection.countDocuments(query);
+    const properties = await propertyCollection
+      .find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limit)
+      .toArray();
+
+    res.send({
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+      properties,
+    });
+  } catch (error) {
+    res.status(500).send({ message: "Failed to load properties" });
+  }
+});
