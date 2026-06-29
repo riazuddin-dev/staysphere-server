@@ -625,3 +625,37 @@ app.get("/transactions", verifyToken, async (req, res) => {
     res.status(500).send({ message: "Failed to fetch transactions" });
   }
 });
+
+app.get("/all-properties", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const result = await propertyCollection.find().toArray();
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to fetch properties" });
+  }
+});
+
+app.patch("/property-status/:id", verifyToken, verifyAdmin, async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { status, feedback } = req.body;
+
+    const result = await propertyCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { status, feedback, updatedAt: new Date() } }
+    );
+    res.send(result);
+  } catch (error) {
+    res.status(500).send({ message: "Failed to update status" });
+  }
+});
+
+app.post("/logout", (req, res) => {
+  res.clearCookie("better-auth.session_token");
+  res.clearCookie("better-auth.session_data");
+  res.send({ success: true, message: "Logout Successful" });
+});
+
+app.get("/private", verifyToken, (req, res) => {
+  res.send({ success: true, user: req.user });
+});
